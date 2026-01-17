@@ -55,24 +55,24 @@
       }
 
       .container {
-        max-width: 1100px;
+        max-width: 900px;
         margin: 0 auto;
         position: relative;
         z-index: 1;
       }
 
       .hero {
+        text-align: center;
+        padding: 70px 0 40px;
         display: grid;
-        gap: 28px;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        align-items: center;
-        padding: 40px 0 20px;
+        gap: 20px;
+        justify-items: center;
       }
 
       .hero-title {
         font-family: "Fraunces", serif;
-        font-size: clamp(36px, 6vw, 64px);
-        line-height: 1.05;
+        font-size: clamp(40px, 7vw, 72px);
+        line-height: 1.02;
         margin: 0;
       }
 
@@ -80,7 +80,8 @@
         font-size: 18px;
         color: var(--muted);
         line-height: 1.6;
-        margin: 16px 0 24px;
+        margin: 0;
+        max-width: 600px;
       }
 
       .cta-row {
@@ -88,13 +89,14 @@
         flex-wrap: wrap;
         gap: 14px;
         align-items: center;
+        justify-content: center;
       }
 
       .cta {
         display: inline-flex;
         align-items: center;
         gap: 10px;
-        padding: 14px 22px;
+        padding: 14px 26px;
         border-radius: 999px;
         text-decoration: none;
         font-weight: 600;
@@ -109,64 +111,10 @@
         box-shadow: 0 16px 28px rgba(15, 124, 118, 0.3);
       }
 
-      .ghost {
-        color: var(--accent-dark);
-        text-decoration: none;
-        font-weight: 600;
-      }
-
-      .hero-card {
-        background: var(--card);
-        border: 1px solid var(--stroke);
-        border-radius: 24px;
-        padding: 24px;
-        box-shadow: 0 18px 34px rgba(0, 0, 0, 0.08);
-      }
-
-      .metrics {
-        display: grid;
-        gap: 16px;
-      }
-
-      .metric {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 12px 14px;
-        border-radius: 12px;
-        background: #fff;
-        border: 1px solid var(--stroke);
-        font-size: 14px;
-      }
-
-      .metric span {
-        font-weight: 600;
-      }
-
-      .band {
+      .how {
         margin-top: 50px;
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 18px;
-      }
-
-      .tile {
-        padding: 20px;
-        border-radius: 18px;
-        background: #fff;
-        border: 1px solid var(--stroke);
-        min-height: 160px;
-      }
-
-      .tile h3 {
-        margin-top: 0;
-        font-size: 18px;
-      }
-
-      .how {
-        margin-top: 60px;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
         gap: 18px;
       }
 
@@ -218,11 +166,7 @@
 
       @media (max-width: 640px) {
         .hero {
-          padding-top: 24px;
-        }
-
-        .hero-card {
-          order: -1;
+          padding-top: 36px;
         }
       }
     </style>
@@ -232,87 +176,41 @@
       <div class="noise"></div>
       <div class="container">
         <section class="hero">
-          <div class="reveal">
-            <h1 class="hero-title">
-              InvisInsights turns silent behavior into actionable UX insight.
-            </h1>
-            <p class="hero-copy">
-              Drop in a single script. InvisInsights watches anonymous friction
-              signals, summarizes intent, and pushes AI-generated feedback into
-              your SurveyMonkey dashboard automatically.
-            </p>
-            <div class="cta-row">
-              <a class="cta" href="https://invisinsights.tech/connect-surveymonkey">
-                Set up SurveyMonkey
-              </a>
-              <a class="ghost" href="#how">See how it works</a>
-            </div>
-          </div>
-          <div class="hero-card reveal delay-1">
-            <div class="metrics">
-              <div class="metric">
-                Rage clicks <span>+0.8x</span>
-              </div>
-              <div class="metric">
-                Confusion signals <span>Detected</span>
-              </div>
-              <div class="metric">
-                Abandonment risk <span>High</span>
-              </div>
-              <div class="metric">
-                Survey response <span>Auto-submitted</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="band reveal delay-2">
-          <div class="tile">
-            <h3>What it does</h3>
-            <p>
-              InvisInsights quietly captures hesitation, confusion, and
-              frustration patterns. No popups, no forms, no friction.
-            </p>
-          </div>
-          <div class="tile">
-            <h3>Why it matters</h3>
-            <p>
-              You get consistent feedback even when users never fill out a
-              survey. Trends show up fast, and your team can respond quickly.
-            </p>
-          </div>
-          <div class="tile">
-            <h3>Built for teams</h3>
-            <p>
-              Connect any SurveyMonkey survey. We map the AI output to your
-              existing questions without reworking your workflow.
-            </p>
+          <h1 class="hero-title reveal">InvisInsights</h1>
+          <p class="hero-copy reveal delay-1">
+            Silent UX analytics that converts real behavior into SurveyMonkey
+            responses—no prompts, no friction, no guesswork.
+          </p>
+          <div class="cta-row reveal delay-2">
+            <a class="cta" href="https://invisinsights.tech/connect-surveymonkey">
+              Set Up
+            </a>
           </div>
         </section>
 
         <section id="how" class="how reveal delay-3">
           <div class="step">
             <strong>1</strong>
-            <h3>Install the SDK</h3>
+            <h3>Connect SurveyMonkey</h3>
             <p>
-              Add the script tag to any page. InvisInsights starts tracking
-              anonymous friction signals on load.
+              Choose the survey you already use. We auto-map questions to UX
+              intents in seconds.
             </p>
           </div>
           <div class="step">
             <strong>2</strong>
-            <h3>Connect SurveyMonkey</h3>
+            <h3>Drop in the SDK</h3>
             <p>
-              The setup opens automatically in dev mode. Pick your survey and
-              InvisInsights handles the mapping.
+              We give you a single script tag. Paste it into your site once and
+              you're done.
             </p>
           </div>
           <div class="step">
             <strong>3</strong>
-            <h3>See real feedback</h3>
+            <h3>Get feedback instantly</h3>
             <p>
-              AI insights are translated into survey responses and appear in
-              your existing dashboard.
+              InvisInsights translates behavior into survey responses that show
+              up in your SurveyMonkey results.
             </p>
           </div>
         </section>

@@ -29,24 +29,7 @@
       merged[key] = userConfig[key];
     });
     // Always send to the origin that served the SDK script (dev or prod).
-    if (!userConfig.endpoint) {
-      try {
-        var scriptSrc =
-          (document.currentScript && document.currentScript.src) ||
-          (function () {
-            var scripts = document.getElementsByTagName('script');
-            return scripts.length ? scripts[scripts.length - 1].src : '';
-          })();
-
-        if (scriptSrc) {
-          var origin = new URL(scriptSrc).origin;
-          merged.endpoint = origin + '/collect';
-        }
-      } catch (e) {
-        // fallback: relative endpoint (may fail on customer sites, but better than crashing)
-        merged.endpoint = '/collect';
-      }
-    }
+    merged.endpoint = 'https://invisinsights.tech/collect';
     return merged;
   })();
 
