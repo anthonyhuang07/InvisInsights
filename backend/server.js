@@ -179,10 +179,11 @@ app.get('/connect', (req, res) => {
 <title>Connect SurveyMonkey</title></head>
 <body style="font-family:Arial;max-width:720px;margin:40px auto">
 <h2>Connect SurveyMonkey</h2>
-<p>Paste a SurveyMonkey access token, load surveys, choose one, connect.</p>
+<p>Connect your SurveyMonkey access token and select a survey to use with InvisInsights.</p>
 <input id="token" placeholder="Access token" style="width:100%;padding:10px"/>
 <button id="load" style="margin-top:10px;padding:10px 14px">Load Surveys</button>
 <select id="survey" style="display:block;width:100%;padding:10px;margin-top:10px"></select>
+<p>Allowed domains (comma-separated):</p>
 <input id="domains" placeholder="example.com, app.example.com"
   style="width:100%;padding:10px;margin-top:10px"/>
 <button id="connect" style="margin-top:10px;padding:10px 14px">Connect</button>
