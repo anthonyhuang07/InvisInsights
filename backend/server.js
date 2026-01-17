@@ -333,16 +333,42 @@ app.post('/collect', requireProject, async (req, res) => {
 /* -------------------- AI (OpenRouter) -------------------- */
 
 function buildPrompt(session, intents) {
+  const hasOpenFeedback = intents.includes('OPEN_FEEDBACK');
+
   return (
-    `You are a UX analytics assistant. Interpret the session JSON as behavioral signals.\n` +
-    `Return ONLY valid JSON. No prose.\n` +
-    `Use normalized intent scores 0..1. If weak evidence, use 0.5 with low confidence.\n\n` +
-    `INTENTS:\n${intents.map((i) => `- ${i}`).join('\n')}\n\n` +
-    `Session:\n${JSON.stringify(session, null, 2)}\n\n` +
-    `Return JSON schema:\n{\n` +
-    `  "intent_scores": { ${intents.map((i) => `"${i}": 0.0`).join(', ')} },\n` +
-    `  "confidence": { ${intents.map((i) => `"${i}": 0.0`).join(', ')} },\n` +
-    `  "open_feedback": []\n` +
+    `You are a UX analytics assistant.\n` +
+    `You analyze user behavior sessions and infer survey responses.\n` +
+    `Return ONLY valid JSON. No explanations, no markdown, no prose.\n\n` +
+
+    `Rules:\n` +
+    `- Use normalized intent scores between 0 and 1.\n` +
+    `- If evidence is weak, use ~0.5 with low confidence.\n` +
+    `- Base ALL outputs strictly on the session data.\n` +
+    (hasOpenFeedback
+      ? `- OPEN_FEEDBACK is REQUIRED. Do NOT leave it empty.\n`
+      : ``) +
+    `\n` +
+
+    `INTENTS:\n` +
+    intents.map((i) => `- ${i}`).join('\n') +
+    `\n\n` +
+
+    `Session data:\n` +
+    `${JSON.stringify(session, null, 2)}\n\n` +
+
+    `Output JSON schema (follow exactly):\n` +
+    `{\n` +
+    `  "intent_scores": {\n` +
+    intents.map((i) => `    "${i}": 0.0`).join(',\n') +
+    `\n  },\n` +
+    `  "confidence": {\n` +
+    intents.map((i) => `    "${i}": 0.0`).join(',\n') +
+    `\n  },\n` +
+    (hasOpenFeedback
+      ? `  "open_feedback": [\n` +
+        `    "Short, realistic user-style improvement comment based on observed behavior."\n` +
+        `  ]\n`
+      : `  "open_feedback": []\n`) +
     `}\n`
   );
 }
@@ -567,10 +593,16 @@ function buildSurveyPagesPayload(analysis, config) {
     let questionPayload = null;
 
     if (type === 'text') {
-      const text = openFeedbackText(analysis);
-      if (text) {
-        questionPayload = { id: q.question_id, answers: [{ text }] };
+      let text = openFeedbackText(analysis);
+
+      if (!text) {
+        text = 'No major issues encountered, but minor UX improvements could help.';
       }
+
+      questionPayload = {
+        id: q.question_id,
+        answers: [{ text }]
+      };
     } else if (type === 'boolean') {
       if (score != null) {
         const choiceId = score >= 0.5 ? q.true_choice_id : q.false_choice_id;
