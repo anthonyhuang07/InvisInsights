@@ -2,7 +2,7 @@
   "name": "invisinsights",
   "version": "1.0.0",
   "type": "module",
-  "main": "invisinsights.js",
+  "main": "app.js",
   "directories": {
     "example": "examples"
   },
