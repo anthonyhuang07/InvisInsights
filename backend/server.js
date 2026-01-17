@@ -1,3 +1,5 @@
+// CREDIT TO CODEX & CHATGPT FOR WRITING 99% OF THIS FILE. ALL I DID IS LEAD DIRECTION AND PROMPT ENGINEERING.
+
 // backend/server.js (ESM)
 import express from 'express';
 import fetch from 'node-fetch';
@@ -11,14 +13,13 @@ const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// If your repo has /frontend at project root (not /backend/frontend)
-const FRONTEND_DIR =
+const FRONTEND_DIR = // Default to 'frontend' folder next to server.js
   process.env.FRONTEND_DIR ||
-  path.join(__dirname, '..', 'frontend'); // <-- change to path.join(__dirname,'frontend') if needed
+  path.join(__dirname, '..', 'frontend');
 
 const app = express();
 
-app.use((req, res, next) => {
+app.use((req, res, next) => { // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Invis-Project-Key');
@@ -38,18 +39,30 @@ app.get('/', (req, res) => res.sendFile(path.join(FRONTEND_DIR, 'index.html')));
 
 /* -------------------- DB -------------------- */
 
+/*
+WHAT IS STORED IN THE DB?
+
+- project_key: unique key for each project
+- allowed_domains: array of domains allowed to use this project
+- surveymonkey_access_token: token to access SurveyMonkey API
+- survey_id: connected survey ID
+- survey_config: JSON config mapping intents to survey questions
+- setup_complete: boolean indicating if setup is complete
+- created_at, updated_at: timestamps
+*/
+
 if (!process.env.DATABASE_URL) {
   console.error('FATAL: DATABASE_URL missing');
 }
 
-const pool = new Pool({
+const pool = new Pool({ // Postgres connection
   connectionString: process.env.DATABASE_URL,
   ssl: {
     rejectUnauthorized: false
   }
 });
 
-async function initDb() {
+async function initDb() { // Create tables if not exist
   await pool.query(`
     CREATE TABLE IF NOT EXISTS projects (
       project_key TEXT PRIMARY KEY,
@@ -66,7 +79,11 @@ async function initDb() {
 
 /* -------------------- HELPERS -------------------- */
 
-const INTENTS = new Set([
+// Intents are a pre-defined set of UX metrics that can be used to normalize
+// survey questions into a common format for AI analysis.
+// Ex. How easy was it to find what you needed? (maps to EASE_OF_USE intent)
+
+const INTENTS = new Set([ // supported intents for AI analysis
   'OVERALL_SATISFACTION',
   'EASE_OF_USE',
   'CONFUSION_LEVEL',
@@ -76,26 +93,16 @@ const INTENTS = new Set([
   'OPEN_FEEDBACK'
 ]);
 
-function generateProjectKey() {
+function generateProjectKey() { // generate a unique project key
   return crypto.randomUUID();
 }
 
-function getHost(req) {
-  const v = req.headers.origin || req.headers.referer;
-  if (!v) return null;
-  try {
-    return new URL(v).hostname;
-  } catch {
-    return null;
-  }
-}
-
-async function getProject(projectKey) {
+async function getProject(projectKey) { // fetch project by key
   const { rows } = await pool.query('SELECT * FROM projects WHERE project_key = $1', [projectKey]);
   return rows[0] || null;
 }
 
-async function upsertProject(data) {
+async function upsertProject(data) { // insert or update project
   await pool.query(
     `
     INSERT INTO projects (
@@ -120,7 +127,7 @@ async function upsertProject(data) {
   );
 }
 
-function extractIntents(config) {
+function extractIntents(config) { // extract unique intents from survey config
   if (!config || !Array.isArray(config.questions)) return [];
   const intents = new Set();
   for (const q of config.questions) {
@@ -129,7 +136,7 @@ function extractIntents(config) {
   return [...intents];
 }
 
-function safeJsonParse(text) {
+function safeJsonParse(text) { // robust JSON parse with fallback
   try {
     return JSON.parse(text);
   } catch {
@@ -145,7 +152,7 @@ function safeJsonParse(text) {
 
 /* -------------------- AUTH MIDDLEWARE -------------------- */
 
-async function requireProject(req, res, next) {
+async function requireProject(req, res, next) { // middleware to validate project key
   try {
     const key = req.header('X-Invis-Project-Key');
     if (!key) return res.status(401).json({ error: 'missing_project_key' });
@@ -168,9 +175,9 @@ async function requireProject(req, res, next) {
   }
 }
 
-/* -------------------- CONNECT SURVEYMONKEY UI -------------------- */
+/* -------------------- CONNECT SURVEYMONKEY ENDPOINT -------------------- */
 
-app.get('/connect', (req, res) => {
+app.get('/connect', (req, res) => { // connect endpoint: UI for connecting SurveyMonkey
   const projectKey = req.query.project_key || '';
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(`<!doctype html>
@@ -267,9 +274,9 @@ document.getElementById('connect').onclick = async function () {
 </body></html>`);
 });
 
-/* -------------------- SURVEYMONKEY: LIST + CONNECT -------------------- */
+/* -------------------- CONNECT SURVEYMONKEY PT2 -------------------- */
 
-app.post('/surveymonkey/surveys', async (req, res) => {
+app.post('/surveymonkey/surveys', async (req, res) => { // list surveys for given access token
   const token = req.body?.access_token;
   if (!token) return res.status(400).json({ error: 'missing_access_token' });
   try {
@@ -280,7 +287,7 @@ app.post('/surveymonkey/surveys', async (req, res) => {
   }
 });
 
-app.post('/connect', async (req, res) => {
+app.post('/connect', async (req, res) => { // connect endpoint: create or update project with SurveyMonkey config
   const { project_key, access_token, survey_id, allowed_domains } = req.body || {};
 
   if (!access_token || !survey_id || !Array.isArray(allowed_domains)) {
@@ -302,13 +309,13 @@ app.post('/connect', async (req, res) => {
     const config = autoMapSurveyToConfig(survey_id, collectors[0].id, details);
     const finalKey = project_key || generateProjectKey();
 
-    // 🔥 DELETE any existing project using this survey_id
+    // DELETE any existing project using this survey_id
     await pool.query(
       `DELETE FROM projects WHERE survey_id = $1`,
       [survey_id]
     );
 
-    // ✅ Insert fresh project
+    // Insert fresh project
     await upsertProject({
       project_key: finalKey,
       allowed_domains,
@@ -333,10 +340,9 @@ app.post('/connect', async (req, res) => {
   }
 });
 
-
 /* -------------------- COLLECT -------------------- */
 
-app.post('/collect', requireProject, async (req, res) => {
+app.post('/collect', requireProject, async (req, res) => { // data collection endpoint - hit every session end (tab close, reload)
   try {
     if (!req.project.setup_complete || !req.project.survey_config) {
       return res.json({ ok: true, survey_status: { needs_setup: true } });
@@ -360,9 +366,9 @@ app.post('/collect', requireProject, async (req, res) => {
   }
 });
 
-/* -------------------- AI (OpenRouter) -------------------- */
+/* -------------------- AI (OpenRouter API) -------------------- */
 
-function buildPrompt(session, intents) {
+function buildPrompt(session, intents) { // build prompt for AI analysis
   const hasOpenFeedback = intents.includes('OPEN_FEEDBACK');
 
   return (
@@ -413,7 +419,7 @@ function buildPrompt(session, intents) {
   );
 }
 
-async function runAI(session, intents) {
+async function runAI(session, intents) { // call OpenRouter API to analyze session
   const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -441,7 +447,7 @@ async function runAI(session, intents) {
 
 /* -------------------- SURVEYMONKEY API -------------------- */
 
-async function fetchSurveyList(token) {
+async function fetchSurveyList(token) { // fetch list of surveys for given access token
   const r = await fetch('https://api.surveymonkey.com/v3/surveys', {
     headers: { Authorization: `Bearer ${token}` }
   });
@@ -450,7 +456,7 @@ async function fetchSurveyList(token) {
   return j?.data || [];
 }
 
-async function fetchSurveyDetails(id, token) {
+async function fetchSurveyDetails(id, token) { // fetch survey details by ID
   const r = await fetch(`https://api.surveymonkey.com/v3/surveys/${id}/details`, {
     headers: { Authorization: `Bearer ${token}` }
   });
@@ -458,7 +464,7 @@ async function fetchSurveyDetails(id, token) {
   return r.json();
 }
 
-async function fetchSurveyCollectors(id, token) {
+async function fetchSurveyCollectors(id, token) { // fetch survey collectors by survey ID
   const r = await fetch(`https://api.surveymonkey.com/v3/surveys/${id}/collectors`, {
     headers: { Authorization: `Bearer ${token}` }
   });
@@ -467,15 +473,15 @@ async function fetchSurveyCollectors(id, token) {
   return j?.data || [];
 }
 
-/* ---- auto map survey -> config ---- */
+/* ---- CREATE CONFIG FROM SURVEY DETAILS ---- */
 
-function extractQuestionText(question) {
+function extractQuestionText(question) {  // extract question text from survey question object
   if (question?.headings?.[0]?.heading) return String(question.headings[0].heading);
   if (question?.heading) return String(question.heading);
   return '';
 }
 
-function inferIntentFromText(text, type) {
+function inferIntentFromText(text, type) { // infer intent from question text
   const v = String(text || '').toLowerCase();
   if (type === 'text') return 'OPEN_FEEDBACK';
   if (v.includes('confus') || v.includes('unclear')) return 'CONFUSION_LEVEL';
@@ -487,7 +493,7 @@ function inferIntentFromText(text, type) {
   return 'OVERALL_SATISFACTION';
 }
 
-function buildChoiceMap(choices) {
+function buildChoiceMap(choices) { // build mapping of choice values to IDs for scale questions
   const map = {};
   // try parse numeric labels
   const nums = choices
@@ -511,7 +517,7 @@ function buildChoiceMap(choices) {
   return { map, min: 1, max: choices.length };
 }
 
-function resolveBooleanChoices(choices) {
+function resolveBooleanChoices(choices) { // resolve true/false choice IDs for boolean questions
   if (!choices || choices.length !== 2) return null;
   const a = String(choices[0]?.text || '').toLowerCase();
   const b = String(choices[1]?.text || '').toLowerCase();
@@ -523,7 +529,7 @@ function resolveBooleanChoices(choices) {
   return { true_choice_id: choices[0].id, false_choice_id: choices[1].id };
 }
 
-function autoMapSurveyToConfig(surveyId, collectorId, details) {
+function autoMapSurveyToConfig(surveyId, collectorId, details) { // auto-map survey questions to config
   const pages = details?.pages || [];
   if (!pages.length) throw new Error('survey_details_missing_pages');
 
@@ -603,7 +609,6 @@ function autoMapSurveyToConfig(surveyId, collectorId, details) {
     questions
   };
 }
-
 /* ---- map analysis -> survey answers + submit ---- */
 
 function clamp01(n) {

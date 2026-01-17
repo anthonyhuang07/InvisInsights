@@ -1,3 +1,5 @@
+// CREDIT TO CODEX & CHATGPT FOR WRITING 99% OF THIS FILE. ALL I DID IS LEAD DIRECTION AND PROMPT ENGINEERING.
+
 (function (window, document) {
   if (window.invisinsights) return;
 
