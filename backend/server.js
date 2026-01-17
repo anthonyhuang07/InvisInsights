@@ -353,7 +353,17 @@ function buildPrompt(session, intents) {
     intents.map((i) => `- ${i}`).join('\n') +
     `\n\n` +
 
-    `Session data:\n` +
+    `Intent guidance:\n` +
+    `- OVERALL_SATISFACTION: Reflect friction, hesitation, and confusion.\n` +
+    `- LIKELIHOOD_TO_CONTINUE: Reflect engagement and abandonment risk.\n` +
+    `- TRUST_CONFIDENCE: Reflect disabled clicks, hesitation near CTAs, and confusion.\n` +
+    `- LIKELIHOOD_TO_CONTINUE and OVERALL_SATISFACTION may be neutral if evidence is mixed.\n` +
+    `- RECOMMENDATION (LIKELIHOOD_TO_CONTINUE / recommend intent):\n` +
+    `  • Do NOT score low unless there is strong negative evidence.\n` +
+    `  • If evidence is weak or mixed, default near neutral (≈0.6).\n` +
+    `  • Only score very low if frustration, rage clicks, or abandonment are strong.\n\n`
+
+      `Session data:\n` +
     `${JSON.stringify(session, null, 2)}\n\n` +
 
     `Output JSON schema (follow exactly):\n` +
@@ -366,8 +376,8 @@ function buildPrompt(session, intents) {
     `\n  },\n` +
     (hasOpenFeedback
       ? `  "open_feedback": [\n` +
-        `    "Short, realistic user-style improvement comment based on observed behavior."\n` +
-        `  ]\n`
+      `    "Short, realistic user-style improvement comment based on observed behavior."\n` +
+      `  ]\n`
       : `  "open_feedback": []\n`) +
     `}\n`
   );
@@ -588,8 +598,6 @@ function buildSurveyPagesPayload(analysis, config) {
     const type = q.type;
     const intent = q.inferred_intent;
     const score = clamp01(analysis?.intent_scores?.[intent]);
-    const conf = clamp01(analysis?.confidence?.[intent]);
-
     let questionPayload = null;
 
     if (type === 'text') {
