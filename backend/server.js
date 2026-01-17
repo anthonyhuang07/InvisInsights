@@ -153,12 +153,6 @@ async function requireProject(req, res, next) {
     const project = await getProject(key);
     if (!project) return res.status(401).json({ error: 'invalid_project_key' });
 
-    // domain lock: only enforce if we have a host and project has allowed_domain set
-    const host = getHost(req);
-    if (project.allowed_domain && host && host !== project.allowed_domain) {
-      return res.status(403).json({ error: 'domain_not_allowed' });
-    }
-
     req.project = project;
     return next();
   } catch (e) {
