@@ -1,6 +1,7 @@
 {
   "name": "invisinsights",
   "version": "1.0.0",
+  "type": "module",
   "main": "invisinsights.js",
   "directories": {
     "example": "examples"
