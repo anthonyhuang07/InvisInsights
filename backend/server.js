@@ -7,17 +7,16 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const { Pool } = pkg;
+const app = express();
+
+app.use(express.json({ limit: '200kb' }));
 app.use(express.static(path.join(__dirname, 'frontend')));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'frontend', 'index.html'));
 });
 
-
-const { Pool } = pkg;
-const app = express();
-
-app.use(express.json({ limit: '200kb' }));
 
 /* -------------------- DB -------------------- */
 
