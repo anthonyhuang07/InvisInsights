@@ -17,7 +17,6 @@
     ctaProximityPx: 120,
     projectKey: null,
     devMode: false,
-    enableAutoSetup: true
   };
 
   var config = (function () {
@@ -29,22 +28,27 @@
     Object.keys(userConfig).forEach(function (key) {
       merged[key] = userConfig[key];
     });
+    // Always send to the origin that served the SDK script (dev or prod).
     if (!userConfig.endpoint) {
-      var host = window.location.hostname;
-      if (host === 'localhost' || host === '127.0.0.1') {
-        merged.endpoint = 'http://localhost:3000/collect';
+      try {
+        var scriptSrc =
+          (document.currentScript && document.currentScript.src) ||
+          (function () {
+            var scripts = document.getElementsByTagName('script');
+            return scripts.length ? scripts[scripts.length - 1].src : '';
+          })();
+
+        if (scriptSrc) {
+          var origin = new URL(scriptSrc).origin;
+          merged.endpoint = origin + '/collect';
+        }
+      } catch (e) {
+        // fallback: relative endpoint (may fail on customer sites, but better than crashing)
+        merged.endpoint = '/collect';
       }
     }
     return merged;
   })();
-
-  function isOwnerMode() {
-    return (
-      config.devMode === true ||
-      window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1'
-    );
-  }
 
   function getScriptProjectKey() {
     var current = document.currentScript;
@@ -75,23 +79,27 @@
     return config.projectKey || window.invisinsightsProjectKey || getScriptProjectKey();
   }
 
-  function getApiBase() {
-    if (typeof config.endpoint !== 'string') {
-      return '';
-    }
-    if (config.endpoint.indexOf('http') !== 0) {
-      return '';
-    }
+  function getSdkOrigin() {
     try {
-      return new URL(config.endpoint).origin;
+      var script =
+        document.currentScript ||
+        (function () {
+          var scripts = document.getElementsByTagName('script');
+          return scripts.length ? scripts[scripts.length - 1] : null;
+        })();
+
+      var src = script && script.src ? script.src : '';
+      return src ? new URL(src).origin : '';
     } catch (e) {
       return '';
     }
   }
 
   function resolveApiUrl(path) {
-    var base = getApiBase();
-    return base ? base + path : path;
+    var origin = getSdkOrigin();
+    if (!origin) return path;
+    if (path.charAt(0) !== '/') path = '/' + path;
+    return origin + path;
   }
 
   function now() {
@@ -532,7 +540,7 @@
       return;
     }
     try {
-      fetch(config.endpoint, {
+      fetch(resolveApiUrl('/collect'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -572,15 +580,6 @@
   }
 
   function start() {
-    if (config.enableAutoSetup && isOwnerMode() && state.projectKey) {
-      checkProjectStatus(function (needsSetup) {
-        if (needsSetup) {
-          return;
-        }
-        init();
-      });
-      return;
-    }
     init();
   }
 
@@ -602,57 +601,4 @@
     }
   };
 
-  var setupTriggered = false;
-
-  function checkProjectStatus(callback) {
-    if (setupTriggered || !state.projectKey) {
-      if (callback) {
-        callback(false);
-      }
-      return;
-    }
-    setupTriggered = true;
-    var url =
-      resolveApiUrl('/project-status');
-    fetch(url, {
-      method: 'GET',
-      credentials: 'omit',
-      headers: { 'X-Invis-Project-Key': state.projectKey }
-    })
-      .then(function (res) {
-        if (!res.ok) {
-          return null;
-        }
-        return res.json();
-      })
-      .then(function (data) {
-        if (!data) {
-          if (callback) {
-            callback(false);
-          }
-          return;
-        }
-        if (!data.needs_setup) {
-          if (callback) {
-            callback(false);
-          }
-          return;
-        }
-        var setupUrl = '/connect-surveymonkey?project_key=' + encodeURIComponent(state.projectKey);
-        setupUrl = resolveApiUrl(setupUrl);
-        if (callback) {
-          callback(true);
-        }
-        var win = window.open(setupUrl, '_blank', 'noopener');
-        if (!win) {
-          window.location.href = setupUrl;
-        }
-      })
-      .catch(function () {
-        if (callback) {
-          callback(false);
-        }
-        return;
-      });
-  }
 })(window, document);

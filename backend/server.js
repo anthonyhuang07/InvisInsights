@@ -152,17 +152,6 @@ async function requireProject(req, res, next) {
   }
 }
 
-/* -------------------- PROJECT STATUS -------------------- */
-
-app.get('/project-status', async (req, res) => {
-  const key = req.header('X-Invis-Project-Key');
-  if (!key) return res.json({ needs_setup: true });
-
-  const project = await getProject(key);
-  if (!project || !project.setup_complete) return res.json({ needs_setup: true });
-  return res.json({ needs_setup: false });
-});
-
 /* -------------------- CONNECT SURVEYMONKEY UI -------------------- */
 
 app.get('/connect-surveymonkey', (req, res) => {
