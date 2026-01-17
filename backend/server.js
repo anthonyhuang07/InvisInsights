@@ -53,7 +53,7 @@ async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS projects (
       project_key TEXT PRIMARY KEY,
-      allowed_domain TEXT,
+      allowed_domains TEXT[],
       surveymonkey_access_token TEXT,
       survey_id TEXT,
       survey_config JSONB,
@@ -153,6 +153,14 @@ async function requireProject(req, res, next) {
     const project = await getProject(key);
     if (!project) return res.status(401).json({ error: 'invalid_project_key' });
 
+    const origin = req.headers.origin || req.headers.referer;
+    if (project.allowed_domains?.length && origin) {
+      const host = new URL(origin).hostname;
+      if (!project.allowed_domains.includes(host)) {
+        return res.status(403).json({ error: 'domain_not_allowed' });
+      }
+    }
+
     req.project = project;
     return next();
   } catch (e) {
@@ -162,7 +170,7 @@ async function requireProject(req, res, next) {
 
 /* -------------------- CONNECT SURVEYMONKEY UI -------------------- */
 
-app.get('/connect-surveymonkey', (req, res) => {
+app.get('/connect', (req, res) => {
   const projectKey = req.query.project_key || '';
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(`<!doctype html>
@@ -175,6 +183,8 @@ app.get('/connect-surveymonkey', (req, res) => {
 <input id="token" placeholder="Access token" style="width:100%;padding:10px"/>
 <button id="load" style="margin-top:10px;padding:10px 14px">Load Surveys</button>
 <select id="survey" style="display:block;width:100%;padding:10px;margin-top:10px"></select>
+<input id="domains" placeholder="example.com, app.example.com"
+  style="width:100%;padding:10px;margin-top:10px"/>
 <button id="connect" style="margin-top:10px;padding:10px 14px">Connect</button>
 <pre id="out" style="background:#f6f6f6;padding:12px;margin-top:16px"></pre>
 <script>
@@ -212,13 +222,19 @@ document.getElementById('load').onclick = async function () {
 document.getElementById('connect').onclick = async function () {
   out.textContent = 'Connecting...';
 
-  const r = await fetch('/connect-surveymonkey', {
+  const r = await fetch('/connect', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       project_key: pk,
       access_token: token.value,
-      survey_id: survey.value
+      survey_id: survey.value,
+      allowed_domains: document
+        .getElementById('domains')
+        .value
+        .split(',')
+        .map(d => d.trim())
+        .filter(Boolean)
     })
   });
 
@@ -263,9 +279,12 @@ app.post('/surveymonkey/surveys', async (req, res) => {
   }
 });
 
-app.post('/connect-surveymonkey', async (req, res) => {
-  const { project_key, access_token, survey_id } = req.body || {};
-  if (!access_token || !survey_id) return res.status(400).json({ error: 'missing_fields' });
+app.post('/connect', async (req, res) => {
+  const { project_key, access_token, survey_id, allowed_domains } = req.body || {};
+
+  if (!access_token || !survey_id || !Array.isArray(allowed_domains)) {
+    return res.status(400).json({ error: 'missing_fields' });
+  }
 
   try {
     const surveys = await fetchSurveyList(access_token);
@@ -275,14 +294,23 @@ app.post('/connect-surveymonkey', async (req, res) => {
 
     const details = await fetchSurveyDetails(survey_id, access_token);
     const collectors = await fetchSurveyCollectors(survey_id, access_token);
-    if (!collectors.length) return res.status(400).json({ error: 'no_collectors' });
+    if (!collectors.length) {
+      return res.status(400).json({ error: 'no_collectors' });
+    }
 
     const config = autoMapSurveyToConfig(survey_id, collectors[0].id, details);
     const finalKey = project_key || generateProjectKey();
 
+    // 🔥 DELETE any existing project using this survey_id
+    await pool.query(
+      `DELETE FROM projects WHERE survey_id = $1`,
+      [survey_id]
+    );
+
+    // ✅ Insert fresh project
     await upsertProject({
       project_key: finalKey,
-      allowed_domain: getHost(req),
+      allowed_domains,
       surveymonkey_access_token: access_token,
       survey_id,
       survey_config: config,
@@ -303,6 +331,7 @@ app.post('/connect-surveymonkey', async (req, res) => {
     return res.status(500).json({ error: 'connect_failed', detail: e.message });
   }
 });
+
 
 /* -------------------- COLLECT -------------------- */
 
