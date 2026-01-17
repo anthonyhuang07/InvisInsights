@@ -1,325 +1,290 @@
-setTimeout(() => {
-  // What is keeping the process alive?
-  const handles = process._getActiveHandles();
-  const requests = process._getActiveRequests();
+import express from 'express';
+import fetch from 'node-fetch';
+import pkg from 'pg';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-  console.log('[debug] active handles:', handles.map(h => h?.constructor?.name));
-  console.log('[debug] active requests:', requests.map(r => r?.constructor?.name));
-}, 2000);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-
-console.log('[boot] start');
-
-console.time('require express');
-const express = require('express');
-console.timeEnd('require express');
-console.log('[boot] after require express');
-
-console.time('init app');
+const { Pool } = pkg;
 const app = express();
-console.timeEnd('init app');
-console.log('[boot] after app init');
 
 app.use(express.json({ limit: '200kb' }));
+app.use(express.static(path.join(__dirname, 'frontend')));
 
-// CORS
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  return next();
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'frontend', 'index.html'));
 });
 
-const sessions = [];
 
-// POST /collect
-app.post('/collect', async (req, res) => {
-  const session = req.body;
-  if (!session || !session.session_id) {
-    return res.status(400).json({ error: 'missing session_id' });
-  }
+/* -------------------- DB -------------------- */
 
-  sessions.push({ session, received_at_ms: Date.now() });
-  if (sessions.length > 100) {
-    sessions.shift();
-  }
-
-  console.log('[collect] session summary:', JSON.stringify(session, null, 2));
-
-  if (process.env.AUTO_ANALYZE === 'true') {
-    try {
-      const analysis = await runOpenRouterAnalysis(session);
-      console.log('[analyze] result:', JSON.stringify(analysis, null, 2));
-    } catch (err) {
-      // Keep /collect resilient; analysis can be run async or separately.
-    }
-  }
-
-  return res.json({ ok: true });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production'
+    ? { rejectUnauthorized: false }
+    : false
 });
 
-// POST /analyze
-app.post('/analyze', async (req, res) => {
-  const session = req.body;
-  if (!session || !session.session_id) {
-    return res.status(400).json({ error: 'missing session_id' });
-  }
+await pool.query(`
+CREATE TABLE IF NOT EXISTS projects (
+  project_key TEXT PRIMARY KEY,
+  allowed_domain TEXT,
+  surveymonkey_access_token TEXT,
+  survey_id TEXT,
+  survey_config JSONB,
+  setup_complete BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+`);
 
-  try {
-    const analysis = await runOpenRouterAnalysis(session);
-    const surveyMetrics = mapToSurveyMetrics(analysis);
+/* -------------------- HELPERS -------------------- */
 
-    if (process.env.SURVEYMONKEY_ACCESS_TOKEN && process.env.SURVEYMONKEY_SURVEY_ID) {
-      await submitSurveyMonkeyResponse({
-        session_id: session.session_id,
-        survey_id: process.env.SURVEYMONKEY_SURVEY_ID,
-        analysis: analysis,
-        derived_metrics: surveyMetrics
-      });
-    }
+const INTENTS = [
+  'OVERALL_SATISFACTION',
+  'EASE_OF_USE',
+  'CONFUSION_LEVEL',
+  'FRUSTRATION_LEVEL',
+  'TRUST_CONFIDENCE',
+  'LIKELIHOOD_TO_CONTINUE',
+  'OPEN_FEEDBACK'
+];
 
-    return res.json({ analysis, survey_metrics: surveyMetrics });
-  } catch (err) {
-    return res.status(500).json({ error: 'analysis_failed', detail: err.message });
-  }
-});
+function generateProjectKey() {
+  return crypto.randomUUID();
+}
 
-function buildOpenRouterPrompt(session) {
-  return (
-    'You are a UX analytics assistant. Interpret the session summary as behavioral signals.' +
-    '\n' +
-    'Return ONLY valid JSON with the specified fields.' +
-    '\n' +
-    'Use probabilistic language (likely, suggests, indicates). Avoid absolute claims.' +
-    '\n\n' +
-    'Session summary JSON:\n' +
-    JSON.stringify(session, null, 2) +
-    '\n\n' +
-    'Required JSON output schema:\n' +
-    '{\n' +
-    '  "ux_clarity_score": number (0-100),\n' +
-    '  "frustration_level": number (0-100),\n' +
-    '  "navigation_intuitiveness": number (0-100),\n' +
-    '  "confidence": {\n' +
-    '    "ux_clarity": number (0-1),\n' +
-    '    "frustration": number (0-1),\n' +
-    '    "navigation": number (0-1),\n' +
-    '    "abandonment": number (0-1)\n' +
-    '  },\n' +
-    '  "inferences": {\n' +
-    '    "ui_confusion": { "summary": string, "signals": string[] },\n' +
-    '    "navigation_difficulty": { "summary": string, "signals": string[] },\n' +
-    '    "user_frustration": { "summary": string, "signals": string[] },\n' +
-    '    "trust_confidence_issues": { "summary": string, "signals": string[] },\n' +
-    '    "likely_abandonment_reason": { "summary": string, "signals": string[] }\n' +
-    '  },\n' +
-    '  "actionable_suggestions": string[]\n' +
-    '}'
+function getHost(req) {
+  const v = req.headers.origin || req.headers.referer;
+  if (!v) return null;
+  try { return new URL(v).hostname; } catch { return null; }
+}
+
+async function getProject(projectKey) {
+  const { rows } = await pool.query(
+    'SELECT * FROM projects WHERE project_key = $1',
+    [projectKey]
   );
+  return rows[0] || null;
 }
 
-// Run OpenRouter analysis
-async function runOpenRouterAnalysis(session) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY not set');
-  }
-
-  const prompt = buildOpenRouterPrompt(session);
-  const model = process.env.OPENROUTER_MODEL || '@preset/invisinsights';
-  const referer = process.env.OPENROUTER_HTTP_REFERER || 'http://localhost';
-  const title = process.env.OPENROUTER_APP_TITLE || 'InvisInsights';
-  const response = await fetch(
-    'https://openrouter.ai/api/v1/chat/completions',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + apiKey,
-        'HTTP-Referer': referer,
-        'X-Title': title
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        top_p: 0.8
-      })
-    }
-  );
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error('OpenRouter error: ' + text);
-  }
-
-  const data = await response.json();
-  const rawText = extractChatContent(data);
-
-  const parsed = safeJsonParse(rawText);
-  if (!parsed) {
-    throw new Error('OpenRouter returned non-JSON response');
-  }
-
-  return parsed;
+async function upsertProject(data) {
+  await pool.query(`
+    INSERT INTO projects (
+      project_key,
+      allowed_domain,
+      surveymonkey_access_token,
+      survey_id,
+      survey_config,
+      setup_complete
+    )
+    VALUES ($1,$2,$3,$4,$5,$6)
+    ON CONFLICT (project_key)
+    DO UPDATE SET
+      allowed_domain = EXCLUDED.allowed_domain,
+      surveymonkey_access_token = EXCLUDED.surveymonkey_access_token,
+      survey_id = EXCLUDED.survey_id,
+      survey_config = EXCLUDED.survey_config,
+      setup_complete = EXCLUDED.setup_complete,
+      updated_at = now()
+  `, [
+    data.project_key,
+    data.allowed_domain,
+    data.surveymonkey_access_token,
+    data.survey_id,
+    data.survey_config,
+    data.setup_complete
+  ]);
 }
 
-function extractChatContent(data) {
-  if (!data || !Array.isArray(data.choices) || !data.choices[0]) {
-    return '';
+/* -------------------- AUTH MIDDLEWARE -------------------- */
+
+async function requireProject(req, res, next) {
+  const key = req.header('X-Invis-Project-Key');
+  if (!key) return res.status(401).json({ error: 'missing_project_key' });
+
+  const project = await getProject(key);
+  if (!project) return res.status(401).json({ error: 'invalid_project_key' });
+
+  const host = getHost(req);
+  if (project.allowed_domain && host && host !== project.allowed_domain) {
+    return res.status(403).json({ error: 'domain_not_allowed' });
   }
-  var message = data.choices[0].message;
-  if (!message || typeof message.content !== 'string') {
-    return '';
-  }
-  return message.content;
+
+  req.project = project;
+  next();
 }
 
-function safeJsonParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    var match = text.match(/\{[\s\S]*\}/);
-    if (!match) {
-      return null;
-    }
-    try {
-      return JSON.parse(match[0]);
-    } catch (err) {
-      return null;
-    }
+/* -------------------- PROJECT STATUS -------------------- */
+
+app.get('/project-status', async (req, res) => {
+  const key = req.header('X-Invis-Project-Key');
+  if (!key) return res.json({ needs_setup: true });
+
+  const project = await getProject(key);
+  if (!project || !project.setup_complete) {
+    return res.json({ needs_setup: true });
   }
-}
+  return res.json({ needs_setup: false });
+});
 
-function mapToSurveyMetrics(analysis) {
-  if (!analysis) {
-    return null;
-  }
-  var frustration = analysis.frustration_level || 0;
-  var clarity = analysis.ux_clarity_score || 0;
-  var nav = analysis.navigation_intuitiveness || 0;
+/* -------------------- CONNECT SURVEYMONKEY -------------------- */
 
-  var csat = Math.max(1, Math.min(5, Math.round((clarity + nav) / 40)));
-  var nps = Math.max(0, Math.min(10, Math.round((clarity - frustration) / 10)));
-
-  return {
-    inferred_csat_1_to_5: csat,
-    inferred_nps_0_to_10: nps,
-    inferred_confusion_flag: clarity < 55,
-    inferred_frustration_flag: frustration > 60,
-    inferred_open_text: analysis.inferences && analysis.inferences.ui_confusion
-      ? analysis.inferences.ui_confusion.summary
-      : 'No strong confusion signals.'
-  };
-}
-
-function deriveSurveyAnswers(analysis) {
-  const metrics = mapToSurveyMetrics(analysis);
-  if (!metrics) {
-    return null;
-  }
-  return {
-    csat: metrics.inferred_csat_1_to_5,
-    nps: metrics.inferred_nps_0_to_10,
-    confusion: metrics.inferred_confusion_flag,
-    improve_text: metrics.inferred_open_text || ''
-  };
-}
-
-function parseChoiceMap(value) {
-  if (!value) {
-    return null;
-  }
-  try {
-    return JSON.parse(value);
-  } catch (e) {
-    return null;
-  }
-}
-
-// Submit response to SurveyMonkey API
-async function submitSurveyMonkeyResponse(payload) {
-  const token = process.env.SURVEYMONKEY_ACCESS_TOKEN;
-  if (!token) {
-    return;
-  }
-
-  const collectorId = process.env.SURVEYMONKEY_COLLECTOR_ID;
-  const pageId = process.env.SURVEYMONKEY_PAGE_ID;
-  const csatQuestionId = process.env.SURVEYMONKEY_CSAT_QUESTION_ID;
-  const npsQuestionId = process.env.SURVEYMONKEY_NPS_QUESTION_ID;
-  const npsRowId = process.env.SURVEYMONKEY_NPS_ROW_ID;
-  const confusionQuestionId = process.env.SURVEYMONKEY_CONFUSION_QUESTION_ID;
-  const improveQuestionId = process.env.SURVEYMONKEY_IMPROVE_QUESTION_ID;
-  const csatChoiceMap = parseChoiceMap(process.env.SURVEYMONKEY_CSAT_CHOICE_IDS);
-  const npsChoiceMap = parseChoiceMap(process.env.SURVEYMONKEY_NPS_CHOICE_IDS);
-  const confusionYesChoiceId = process.env.SURVEYMONKEY_CONFUSION_CHOICE_ID_YES;
-  const confusionNoChoiceId = process.env.SURVEYMONKEY_CONFUSION_CHOICE_ID_NO;
-
-  if (!collectorId || !pageId || !csatQuestionId || !npsQuestionId || !npsRowId || !confusionQuestionId || !improveQuestionId) {
-    throw new Error('SurveyMonkey question/page IDs not set');
-  }
-
-  const answers = deriveSurveyAnswers(payload.analysis);
-  if (!answers) {
-    return;
-  }
-
-  const csatChoiceId = csatChoiceMap ? csatChoiceMap[String(answers.csat)] : null;
-  const npsChoiceId = npsChoiceMap ? npsChoiceMap[String(answers.nps)] : null;
-  const confusionChoiceId = answers.confusion ? confusionYesChoiceId : confusionNoChoiceId;
-
-  if (!csatChoiceId || !npsChoiceId || !confusionChoiceId) {
-    throw new Error('SurveyMonkey choice IDs not set for derived answers');
-  }
-
-  const body = {
-    response_status: 'completed',
-    pages: [
-      {
-        id: pageId,
-        questions: [
-          { id: csatQuestionId, answers: [{ choice_id: csatChoiceId }] },
-          { id: npsQuestionId, answers: [{ row_id: npsRowId, choice_id: npsChoiceId }] },
-          { id: confusionQuestionId, answers: [{ choice_id: confusionChoiceId }] },
-          { id: improveQuestionId, answers: [{ text: answers.improve_text }] }
-        ]
-      }
-    ],
-    custom_variables: {
-      inferred: 'true',
-      source: 'invisinsights',
-      session_id: payload.session_id
-    }
-  };
-
-  const response = await fetch('https://api.surveymonkey.com/v3/collectors/' + collectorId + '/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + token
-    },
-    body: JSON.stringify(body)
+app.get('/connect-surveymonkey', (req, res) => {
+  const projectKey = req.query.project_key || '';
+  res.send(`
+<!doctype html>
+<html>
+<body>
+<h2>Connect SurveyMonkey</h2>
+<input id="token" placeholder="Access token"/>
+<button onclick="load()">Load Surveys</button>
+<select id="survey"></select>
+<button onclick="connect()">Connect</button>
+<script>
+const pk = ${JSON.stringify(projectKey)};
+async function load() {
+  const r = await fetch('/surveymonkey/surveys', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ access_token:token.value })
   });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error('SurveyMonkey error: ' + text);
+  const d = await r.json();
+  survey.innerHTML = d.surveys.map(s=>\`<option value="\${s.id}">\${s.title}</option>\`).join('');
+}
+async function connect() {
+  await fetch('/connect-surveymonkey',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      project_key: pk,
+      access_token: token.value,
+      survey_id: survey.value
+    })
+  });
+  alert('Connected');
+}
+</script>
+</body>
+</html>
+`);
+});
+
+app.post('/connect-surveymonkey', async (req, res) => {
+  const { project_key, access_token, survey_id } = req.body;
+  if (!access_token || !survey_id) {
+    return res.status(400).json({ error: 'missing_fields' });
   }
+
+  const surveys = await fetchSurveyList(access_token);
+  if (!surveys.find(s => s.id === survey_id)) {
+    return res.status(400).json({ error: 'survey_not_found' });
+  }
+
+  const details = await fetchSurveyDetails(survey_id, access_token);
+  const collectors = await fetchSurveyCollectors(survey_id, access_token);
+  if (!collectors.length) {
+    return res.status(400).json({ error: 'no_collectors' });
+  }
+
+  const config = autoMapSurveyToConfig(survey_id, collectors[0].id, details);
+  const finalKey = project_key || generateProjectKey();
+
+  await upsertProject({
+    project_key: finalKey,
+    allowed_domain: getHost(req),
+    surveymonkey_access_token: access_token,
+    survey_id,
+    survey_config: config,
+    setup_complete: true
+  });
+
+  res.json({ ok: true, project_key: finalKey });
+});
+
+/* -------------------- COLLECT -------------------- */
+
+app.post('/collect', requireProject, async (req, res) => {
+  if (!req.project.setup_complete) {
+    return res.json({ ok: true, survey_status: { needs_setup: true } });
+  }
+
+  const intents = extractIntents(req.project.survey_config);
+  const analysis = await runAI(req.body, intents);
+
+  await submitSurveyMonkey({
+    analysis,
+    config: req.project.survey_config,
+    token: req.project.surveymonkey_access_token
+  });
+
+  res.json({ ok: true });
+});
+
+/* -------------------- AI -------------------- */
+
+function buildPrompt(session, intents) {
+  return `
+Analyze UX behavior.
+
+INTENTS:
+${intents.map(i=>'- '+i).join('\n')}
+
+Session:
+${JSON.stringify(session)}
+
+Return JSON:
+{
+  "intent_scores": { ${intents.map(i=>`"${i}":0.0`).join(',')} },
+  "confidence": { ${intents.map(i=>`"${i}":0.0`).join(',')} },
+  "open_feedback": []
+}
+`;
 }
 
-module.exports = { app };
+async function runAI(session, intents) {
+  const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer '+process.env.OPENROUTER_API_KEY
+    },
+    body:JSON.stringify({
+      model:'@preset/invisinsights',
+      messages:[{role:'user',content:buildPrompt(session,intents)}],
+      temperature:0.2
+    })
+  });
+  const j = await r.json();
+  return JSON.parse(j.choices[0].message.content);
+}
+
+/* -------------------- SURVEYMONKEY -------------------- */
+
+async function fetchSurveyList(token) {
+  const r = await fetch('https://api.surveymonkey.com/v3/surveys',{
+    headers:{Authorization:'Bearer '+token}
+  });
+  return (await r.json()).data || [];
+}
+
+async function fetchSurveyDetails(id, token) {
+  const r = await fetch(`https://api.surveymonkey.com/v3/surveys/${id}/details`,{
+    headers:{Authorization:'Bearer '+token}
+  });
+  return r.json();
+}
+
+async function fetchSurveyCollectors(id, token) {
+  const r = await fetch(`https://api.surveymonkey.com/v3/surveys/${id}/collectors`,{
+    headers:{Authorization:'Bearer '+token}
+  });
+  return (await r.json()).data || [];
+}
+
+/* -------------------- START -------------------- */
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log('InvisInsights API listening on ' + port);
-});
+app.listen(port, () => console.log('InvisInsights running on', port));

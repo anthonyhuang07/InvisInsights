@@ -15,9 +15,9 @@
     jitterAngleRad: 1.7,
     jitterMoveWindowMs: 120,
     ctaProximityPx: 120,
-    enablePeriodicFlush: true,
-    flushIntervalMs: 15000,
-    enableVisibilityFlush: true
+    projectKey: null,
+    devMode: false,
+    enableAutoSetup: true
   };
 
   var config = (function () {
@@ -37,6 +37,62 @@
     }
     return merged;
   })();
+
+  function isOwnerMode() {
+    return (
+      config.devMode === true ||
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1'
+    );
+  }
+
+  function getScriptProjectKey() {
+    var current = document.currentScript;
+    if (current && current.getAttribute) {
+      var key = current.getAttribute('data-project-key');
+      if (key) {
+        return key;
+      }
+    }
+    var scripts = document.getElementsByTagName('script');
+    for (var i = scripts.length - 1; i >= 0; i -= 1) {
+      var script = scripts[i];
+      if (!script || !script.getAttribute) {
+        continue;
+      }
+      var src = script.getAttribute('src') || '';
+      if (src.indexOf('invisinsights') !== -1) {
+        var attr = script.getAttribute('data-project-key');
+        if (attr) {
+          return attr;
+        }
+      }
+    }
+    return null;
+  }
+
+  function getProjectKey() {
+    return config.projectKey || window.invisinsightsProjectKey || getScriptProjectKey();
+  }
+
+  function getApiBase() {
+    if (typeof config.endpoint !== 'string') {
+      return '';
+    }
+    if (config.endpoint.indexOf('http') !== 0) {
+      return '';
+    }
+    try {
+      return new URL(config.endpoint).origin;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function resolveApiUrl(path) {
+    var base = getApiBase();
+    return base ? base + path : path;
+  }
 
   function now() {
     return Date.now();
@@ -216,7 +272,9 @@
     lastScrollDirChangeTs: 0,
     sectionVisits: new Map(),
     recentClicks: [],
-    sentFinal: false
+    sentFinal: false,
+    projectKey: getProjectKey(),
+    unloading: false
   };
 
   function markActivity(el) {
@@ -426,6 +484,7 @@
     var nearCta = ctaDistance !== null && ctaDistance <= config.ctaProximityPx;
 
     return {
+      project_id: state.projectKey,
       session_id: state.sessionId,
       page_path: window.location.pathname,
       page_query: window.location.search || '',
@@ -469,20 +528,16 @@
     payload.session_end_reason = reason || 'unknown';
 
     var body = JSON.stringify(payload);
-    if (navigator.sendBeacon) {
-      try {
-        var blob = new Blob([body], { type: 'application/json' });
-        navigator.sendBeacon(config.endpoint, blob);
-        return;
-      } catch (e) {
-        // fall through to fetch
-      }
+    if (!state.projectKey) {
+      return;
     }
-
     try {
       fetch(config.endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Invis-Project-Key': state.projectKey
+        },
         body: body,
         keepalive: true,
         credentials: 'omit'
@@ -490,12 +545,6 @@
     } catch (e) {
       return;
     }
-  }
-
-  function scheduleSessionTimeout() {
-    window.setTimeout(function () {
-      sendPayload('timeout', true);
-    }, config.sessionTimeoutMs);
   }
 
   function init() {
@@ -510,45 +559,100 @@
     window.addEventListener('touchstart', onTouchStart, { passive: true });
 
     window.addEventListener('beforeunload', function () {
+      state.unloading = true;
       sendPayload('beforeunload', true);
     });
 
     window.addEventListener('pagehide', function () {
+      state.unloading = true;
       sendPayload('pagehide', true);
     });
 
-    if (config.enableVisibilityFlush) {
-      document.addEventListener('visibilitychange', function () {
-        if (document.hidden) {
-          sendPayload('visibilitychange', false);
-        }
-      });
-    }
-
-    if (config.enablePeriodicFlush && config.flushIntervalMs > 0) {
-      window.setInterval(function () {
-        if (!state.sentFinal) {
-          sendPayload('interval', false);
-        }
-      }, config.flushIntervalMs);
-    }
-
     window.setInterval(onIdleCheck, 1000);
-    scheduleSessionTimeout();
+  }
+
+  function start() {
+    if (config.enableAutoSetup && isOwnerMode() && state.projectKey) {
+      checkProjectStatus(function (needsSetup) {
+        if (needsSetup) {
+          return;
+        }
+        init();
+      });
+      return;
+    }
+    init();
   }
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    init();
+    start();
   } else {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', start);
   }
 
   window.invisinsights = {
     getSessionId: function () {
       return state.sessionId;
     },
+    getProjectKey: function () {
+      return state.projectKey;
+    },
     flush: function () {
       sendPayload('manual', true);
     }
   };
+
+  var setupTriggered = false;
+
+  function checkProjectStatus(callback) {
+    if (setupTriggered || !state.projectKey) {
+      if (callback) {
+        callback(false);
+      }
+      return;
+    }
+    setupTriggered = true;
+    var url =
+      resolveApiUrl('/project-status');
+    fetch(url, {
+      method: 'GET',
+      credentials: 'omit',
+      headers: { 'X-Invis-Project-Key': state.projectKey }
+    })
+      .then(function (res) {
+        if (!res.ok) {
+          return null;
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        if (!data) {
+          if (callback) {
+            callback(false);
+          }
+          return;
+        }
+        if (!data.needs_setup) {
+          if (callback) {
+            callback(false);
+          }
+          return;
+        }
+        var setupUrl = '/connect-surveymonkey?project_key=' + encodeURIComponent(state.projectKey);
+        setupUrl = resolveApiUrl(setupUrl);
+        if (callback) {
+          callback(true);
+        }
+        var win = window.open(setupUrl, '_blank', 'noopener');
+        if (!win) {
+          window.location.href = setupUrl;
+        }
+      })
+      .catch(function () {
+        if (callback) {
+          callback(false);
+        }
+        return;
+      });
+  }
 })(window, document);
