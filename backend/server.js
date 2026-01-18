@@ -483,40 +483,62 @@ app.post('/collect', requireProject, async (req, res) => { // data collection en
   }
 });
 
-/* -------------------- AI (OpenRouter API) -------------------- */
+/* -------------------- AI (Gemini API) -------------------- */
 
-function buildPrompt(session, intents) { // build prompt for AI analysis
+function buildPrompt(session, intents) {
   const hasOpenFeedback = intents.includes('OPEN_FEEDBACK');
 
   return (
     `You are a UX analytics assistant.\n` +
-    `You analyze user behavior sessions and infer survey responses.\n` +
+    `Your task is to infer survey-style responses from behavioral session data.\n` +
     `Return ONLY valid JSON. No explanations, no markdown, no prose.\n\n` +
 
-    `Rules:\n` +
-    `- Use normalized intent scores between 0 and 1.\n` +
-    `- If evidence is weak, use ~0.5 with low confidence.\n` +
-    `- Base ALL outputs strictly on the session data.\n` +
+    `Core rules:\n` +
+    `- All intent scores must be normalized between 0.0 and 1.0.\n` +
+    `- If evidence is weak, ambiguous, or mixed, default near neutral (~0.5).\n` +
+    `- Do NOT assume negative intent without strong supporting signals.\n` +
+    `- Base conclusions strictly on the provided session data.\n` +
     (hasOpenFeedback
-      ? `- OPEN_FEEDBACK is REQUIRED. Do NOT leave it empty.\n`
+      ? `- OPEN_FEEDBACK is REQUIRED and must contain at least one realistic comment.\n`
       : ``) +
     `\n` +
+
+    `Important interpretation rules:\n` +
+    `- Long time on page, steady scrolling, and rereading WITHOUT rage clicks,\n` +
+    `  navigation loops, or disabled clicks should be treated as ENGAGEMENT,\n` +
+    `  not confusion.\n` +
+    `- Rereading behavior can indicate interest or careful reading.\n` +
+    `- Idle time can indicate thinking or reading, not hesitation, unless paired\n` +
+    `  with repeated failed interactions or abandonment.\n` +
+    `- Only infer CONFUSION or FRUSTRATION when multiple negative signals align\n` +
+    `  (e.g., rage clicks, disabled clicks, navigation loops, CTA hesitation).\n\n` +
 
     `INTENTS:\n` +
     intents.map((i) => `- ${i}`).join('\n') +
     `\n\n` +
 
-    `Intent guidance:\n` +
-    `- OVERALL_SATISFACTION: Reflect friction, hesitation, and confusion.\n` +
-    `- LIKELIHOOD_TO_CONTINUE: Reflect engagement and abandonment risk.\n` +
-    `- TRUST_CONFIDENCE: Reflect disabled clicks, hesitation near CTAs, and confusion.\n` +
-    `- LIKELIHOOD_TO_CONTINUE and OVERALL_SATISFACTION may be neutral if evidence is mixed.\n` +
-    `- RECOMMENDATION (LIKELIHOOD_TO_CONTINUE / recommend intent):\n` +
-    `  • Do NOT score low unless there is strong negative evidence.\n` +
-    `  • If evidence is weak or mixed, default near neutral (≈0.6).\n` +
-    `  • Only score very low if frustration, rage clicks, or abandonment are strong.\n\n` +
+    `Intent-specific guidance:\n` +
+    `- OVERALL_SATISFACTION:\n` +
+    `  Reflect the overall experience quality. Do NOT assume dissatisfaction\n` +
+    `  from long reading sessions alone.\n` +
+    `- EASE_OF_USE:\n` +
+    `  Lower only if the user shows repeated failed interactions or confusion signals.\n` +
+    `- CONFUSION_LEVEL:\n` +
+    `  Score low ONLY if the session shows clear disorientation or repeated correction.\n` +
+    `- TRUST_CONFIDENCE:\n` +
+    `  Lower primarily due to disabled clicks, broken interactions, or hesitation near CTAs.\n` +
+    `- LIKELIHOOD_TO_CONTINUE / RECOMMEND:\n` +
+    `  • Do NOT score low unless strong negative evidence exists.\n` +
+    `  • If engagement is present and abandonment is unclear, default to neutral-positive (~0.6).\n` +
+    `  • Only score very low when frustration and abandonment signals are strong.\n\n` +
 
-      `Session data:\n` +
+    `OPEN_FEEDBACK guidance:\n` +
+    `- Write from the perspective of a normal user.\n` +
+    `- Be concise, neutral, and realistic.\n` +
+    `- Do NOT speculate about confusion unless evidence is strong.\n` +
+    `- If behavior appears engaged but imperfect, suggest minor or optional improvements.\n\n` +
+
+    `Session data:\n` +
     `${JSON.stringify(session, null, 2)}\n\n` +
 
     `Output JSON schema (follow exactly):\n` +
@@ -529,8 +551,8 @@ function buildPrompt(session, intents) { // build prompt for AI analysis
     `\n  },\n` +
     (hasOpenFeedback
       ? `  "open_feedback": [\n` +
-      `    "Short, realistic user-style improvement comment based on observed behavior."\n` +
-      `  ]\n`
+        `    "Short, realistic user-style feedback based on observed behavior."\n` +
+        `  ]\n`
       : `  "open_feedback": []\n`) +
     `}\n`
   );
