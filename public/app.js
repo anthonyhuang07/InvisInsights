@@ -3,6 +3,7 @@
 (function (window, document) {
   if (window.invisinsights) return;
 
+  // Configuration
   var config = {
     endpoint: 'https://invisinsights.tech/collect',
     idleThresholdMs: 3000,
@@ -15,6 +16,7 @@
     projectKey: null
   };
 
+  // Get project key from script tag
   function getProjectKey() {
     var s = document.currentScript;
     return (
@@ -28,11 +30,13 @@
     return Date.now();
   }
 
+  // Simple UUID generator
   function uuid() {
     return (crypto.randomUUID && crypto.randomUUID()) ||
       'sess_' + Math.random().toString(36).slice(2);
   }
 
+  // State variables
   var state = {
     sessionId: sessionStorage.getItem('ifai_sid') || uuid(),
     pageStartTs: now(),
@@ -55,12 +59,14 @@
     projectKey: getProjectKey()
   };
 
+  // Save session ID
   sessionStorage.setItem('ifai_sid', state.sessionId);
 
   function isDisabled(el) {
     return el && (el.disabled || el.getAttribute('aria-disabled') === 'true');
   }
 
+  // Check if element is interactive
   function isInteractive(el) {
     if (!el || el.nodeType !== 1) return false;
     var tag = el.tagName.toLowerCase();
@@ -71,6 +77,7 @@
     );
   }
 
+  // Check if element is a Call-To-Action (CTA)
   function isCTA(el) {
     return el && (
       el.matches('button, a[href], input[type=submit], input[type=button]') ||
@@ -78,6 +85,7 @@
     );
   }
 
+  // Mark user activity
   function markActivity(el) {
     var ts = now();
     if (state.idleStartTs) {
@@ -94,6 +102,7 @@
     }
   }
 
+  // Idle check
   function onIdleCheck() {
     var ts = now();
     if (!state.idleStartTs && ts - state.lastActiveTs >= config.idleThresholdMs) {
@@ -101,6 +110,7 @@
     }
   }
 
+  // Scroll event handler
   function onScroll() {
     var y = window.scrollY || 0;
     var ts = now();
@@ -117,6 +127,7 @@
     markActivity(null);
   }
 
+  // Click event handler
   function onClick(e) {
     var ts = now();
     var el = e.target;
@@ -151,6 +162,7 @@
     markActivity(el);
   }
 
+  // Build payload
   function buildPayload(reason) {
     var ts = now();
     var timeOnPage = ts - state.pageStartTs;
@@ -187,6 +199,7 @@
     };
   }
 
+  // Send payload to server
   function sendPayload(reason) {
     if (state.sentFinal) return;
     state.sentFinal = true;
@@ -204,6 +217,7 @@
     });
   }
 
+  // Initialization
   function init() {
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('click', onClick, true);
