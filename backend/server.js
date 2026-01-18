@@ -292,7 +292,7 @@ app.get('/connect', (req, res) => { // connect endpoint: UI for connecting Surve
     <p>Paste a SurveyMonkey access token, select a survey, and lock it to your domains.</p>
 
     <label for="token">Access token</label>
-    <input id="token" placeholder="sm_****" autocomplete="off">
+    <input id="token" autocomplete="off">
 
     <div class="row">
       <button id="load">Load surveys</button>
