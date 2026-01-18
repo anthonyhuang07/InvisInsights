@@ -558,23 +558,32 @@ function buildPrompt(session, intents) {
   );
 }
 
-async function runAI(session, intents) { // call Gemini API to analyze session
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+async function callGemini(model, prompt) { // call Gemini API with given model and prompt
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
-  const r = await fetch(url, {
+  return fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: buildPrompt(session, intents) }] }],
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.2 }
     })
   });
+}
 
+async function runAI(session, intents) { // call Gemini API to analyze session
+  const primaryModel = 'gemini-2.5-flash';
+  const fallbackModel =  'gemini-2.5-flash-lite';
+  const prompt = buildPrompt(session, intents);
+
+  let r = await callGemini(primaryModel, prompt);
   if (!r.ok) {
     const t = await r.text();
-    throw new Error(`gemini_error: ${t}`);
+    r = await callGemini(fallbackModel, prompt);
+    if (!r.ok) {
+      throw new Error(`gemini_error: ${t}`);
+    }
   }
 
   const j = await r.json();
