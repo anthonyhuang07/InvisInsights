@@ -178,25 +178,142 @@ async function requireProject(req, res, next) { // middleware to validate projec
 /* -------------------- CONNECT SURVEYMONKEY ENDPOINT -------------------- */
 
 app.get('/connect', (req, res) => { // connect endpoint: UI for connecting SurveyMonkey
-  const projectKey = req.query.project_key || '';
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(`<!doctype html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Connect SurveyMonkey</title></head>
-<body style="font-family:Arial;max-width:720px;margin:40px auto">
-<h2>Connect SurveyMonkey</h2>
-<p>Connect your SurveyMonkey access token and select a survey to use with InvisInsights.</p>
-<input id="token" placeholder="Access token" style="width:100%;padding:10px"/>
-<button id="load" style="margin-top:10px;padding:10px 14px">Load Surveys</button>
-<select id="survey" style="display:block;width:100%;padding:10px;margin-top:10px"></select>
-<p>Allowed domains (comma-separated):</p>
-<input id="domains" placeholder="example.com, app.example.com"
-  style="width:100%;padding:10px;margin-top:10px"/>
-<button id="connect" style="margin-top:10px;padding:10px 14px">Connect</button>
-<pre id="out" style="background:#f6f6f6;padding:12px;margin-top:16px"></pre>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect SurveyMonkey</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f4efe7;
+      --ink: #1c1c1c;
+      --muted: #4b4b4b;
+      --accent: #0f7c76;
+      --card: #ffffff;
+      --stroke: rgba(0, 0, 0, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", system-ui, sans-serif;
+      color: var(--ink);
+      background: radial-gradient(900px 500px at 15% -10%, #ffe7c2 0%, transparent 60%),
+        radial-gradient(800px 600px at 90% 0%, #d9f1ee 0%, transparent 55%),
+        var(--bg);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 40px 20px;
+    }
+
+    .card {
+      width: min(720px, 100%);
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 18px 34px rgba(0, 0, 0, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+    }
+
+    p {
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin: 14px 0 6px;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--stroke);
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    .row {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      margin-top: 14px;
+    }
+
+    button {
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      padding: 12px 16px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: 0 10px 22px rgba(15, 124, 118, 0.2);
+    }
+
+    button:hover { transform: translateY(-1px); }
+
+    #out {
+      margin-top: 18px;
+      background: #f6f6f6;
+      border-radius: 12px;
+      padding: 12px;
+      min-height: 44px;
+      white-space: pre-wrap;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Connect SurveyMonkey</h1>
+    <p>Paste a SurveyMonkey access token, select a survey, and lock it to your domains.</p>
+
+    <label for="token">Access token</label>
+    <input id="token" placeholder="sm_****" autocomplete="off">
+
+    <div class="row">
+      <button id="load">Load surveys</button>
+    </div>
+
+    <label for="survey">Survey</label>
+    <select id="survey"></select>
+
+    <label for="domains">Allowed domains</label>
+    <input id="domains" placeholder="example.com, app.example.com">
+    <div class="hint">Comma-separated. Leave empty to allow any domain.</div>
+
+    <div class="row">
+      <button id="connect">Connect</button>
+    </div>
+
+    <pre id="out"></pre>
+  </div>
+
 <script>
-const pk = ${JSON.stringify(projectKey)};
+const pk = new URLSearchParams(window.location.search).get('project_key') || '';
 const out = document.getElementById('out');
 const token = document.getElementById('token');
 const survey = document.getElementById('survey');
@@ -270,8 +387,8 @@ document.getElementById('connect').onclick = async function () {
   out.appendChild(pre);
 };
 </script>
-
-</body></html>`);
+</body>
+</html>`);
 });
 
 /* -------------------- CONNECT SURVEYMONKEY PT2 -------------------- */
