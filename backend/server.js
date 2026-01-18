@@ -536,27 +536,27 @@ function buildPrompt(session, intents) { // build prompt for AI analysis
   );
 }
 
-async function runAI(session, intents) { // call OpenRouter API to analyze session
-  const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+async function runAI(session, intents) { // call Gemini API to analyze session
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+  const r = await fetch(url, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: process.env.OPENROUTER_MODEL || '@preset/invisinsights',
-      messages: [{ role: 'user', content: buildPrompt(session, intents) }],
-      temperature: 0.2
+      contents: [{ role: 'user', parts: [{ text: buildPrompt(session, intents) }] }],
+      generationConfig: { temperature: 0.2 }
     })
   });
 
   if (!r.ok) {
     const t = await r.text();
-    throw new Error(`openrouter_error: ${t}`);
+    throw new Error(`gemini_error: ${t}`);
   }
 
   const j = await r.json();
-  const raw = j?.choices?.[0]?.message?.content ?? '';
+  const raw = j?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
   const parsed = safeJsonParse(raw);
   if (!parsed) throw new Error('ai_returned_non_json');
   return parsed;
