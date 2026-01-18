@@ -537,7 +537,7 @@ function buildPrompt(session, intents) { // build prompt for AI analysis
 }
 
 async function runAI(session, intents) { // call Gemini API to analyze session
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
   const r = await fetch(url, {
     method: 'POST',
