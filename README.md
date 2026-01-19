@@ -1,19 +1,8 @@
 # InvisInsights
 
-Invisible feedback for websites. Drop a single script, capture friction signals, and auto-submit AI-inferred responses into SurveyMonkey.
+A SurveyMonkey companion that turns passive behavior into real feedback. Your surveys fill themselves without asking anyone.
 
-## Quick start
-
-### 1) Connect SurveyMonkey
-Click **Set Up** on the landing page to connect your survey and generate a project key.
-
-### 2) Add the SDK to your site
-```html
-<script
-  src="https://invisinsights.tech/app.js"
-  data-project-key="YOUR_PROJECT_KEY">
-</script>
-```
+[Demo Video](https://www.youtube.com/watch?v=oyHC7R3VAXs)
 
 ## How it works
 1. Connect a SurveyMonkey survey.
